@@ -1,0 +1,29 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --color-surface: oklch(0.99 0.004 280);
+  --color-surface-muted: oklch(0.965 0.006 280);
+  --color-border: oklch(0.91 0.012 280);
+  --color-text: oklch(0.35 0.02 280);
+  --color-text-strong: oklch(0.2 0.03 280);
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply m-0 min-h-dvh bg-zinc-50 font-sans text-zinc-700 antialiased;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 50% -30%, rgb(238 242 255 / 0.85), transparent),
+      radial-gradient(ellipse 70% 50% at 100% 50%, rgb(244 244 245 / 0.9), transparent);
+    background-attachment: fixed;
+  }
+}
+
+@utility thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: theme(colors.zinc.300) transparent;
+}
+
