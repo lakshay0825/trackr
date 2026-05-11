@@ -51,12 +51,23 @@ export function ApplicationModal({
   title,
 }) {
   const [form, setForm] = useState(() => buildForm(initialValues))
+  const [saving, setSaving] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.company.trim() || !form.role.trim()) return
-    onSubmit(form)
-    onClose()
+    setSaving(true)
+    try {
+      await Promise.resolve(onSubmit(form))
+      onClose()
+    } catch (err) {
+      console.error(err)
+      window.alert(
+        'Could not save. If you use the API, check that the server is running and CORS is configured.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -133,11 +144,20 @@ export function ApplicationModal({
             />
           </div>
           <DialogFooter className="border-t-0 px-0 pt-2">
-            <Button type="button" variant="secondary" onClick={onClose}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onClose}
+              disabled={saving}
+            >
               Cancel
             </Button>
-            <Button type="submit">
-              {initialValues ? 'Save changes' : 'Add application'}
+            <Button type="submit" disabled={saving}>
+              {saving
+                ? 'Saving…'
+                : initialValues
+                  ? 'Save changes'
+                  : 'Add application'}
             </Button>
           </DialogFooter>
         </form>

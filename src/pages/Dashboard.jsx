@@ -29,6 +29,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { DemoLoading } from '../components/DemoLoading'
 import { StatusBadge } from '../components/StatusBadge'
 import { useApplications } from '../context/useApplications'
 import { cn } from '@/lib/utils'
@@ -101,7 +102,11 @@ function StatusSummaryCard({ status, count, total }) {
 }
 
 export function Dashboard() {
-  const { applications } = useApplications()
+  const { applications, ready, useApi } = useApplications()
+
+  if (!ready) {
+    return <DemoLoading label="Connecting to your data…" />
+  }
 
   const total = applications.length
   const interviews = applications.filter((a) => a.status === 'Interview').length
@@ -134,7 +139,10 @@ export function Dashboard() {
           Dashboard
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-600">
-          Pipeline health at a glance — built-in sample roles; your edits stay in this browser.
+          Pipeline health at a glance.
+          {useApi
+            ? ' Data is loaded from the REST API (MongoDB).'
+            : ' Offline demo: data stays in this browser (localStorage).'}
         </p>
       </div>
 

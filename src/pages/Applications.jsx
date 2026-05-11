@@ -10,6 +10,7 @@ import {
 import { useMemo, useState } from 'react'
 import { APPLICATION_STATUSES } from '../constants'
 import { ApplicationModal } from '../components/ApplicationModal'
+import { DemoLoading } from '../components/DemoLoading'
 import { KanbanBoard } from '../components/KanbanBoard'
 import { StatusBadge } from '../components/StatusBadge'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,8 @@ import { cn } from '@/lib/utils'
 export function Applications() {
   const {
     applications,
+    ready,
+    useApi,
     addApplication,
     updateApplication,
     deleteApplication,
@@ -46,6 +49,7 @@ export function Applications() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalKey, setModalKey] = useState(0)
   const [editing, setEditing] = useState(null)
+  const [resetting, setResetting] = useState(false)
 
   const sorted = useMemo(
     () =>
@@ -67,9 +71,13 @@ export function Applications() {
     setModalOpen(true)
   }
 
-  const handleSubmit = (form) => {
-    if (editing) updateApplication(editing.id, form)
-    else addApplication(form)
+  const handleSubmit = async (form) => {
+    if (editing) await updateApplication(editing.id, form)
+    else await addApplication(form)
+  }
+
+  if (!ready) {
+    return <DemoLoading label="Connecting to your data…" />
   }
 
   return (
@@ -80,7 +88,10 @@ export function Applications() {
             Applications
           </h1>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-600">
-            Manage roles in a polished table or drag cards across stages on the Kanban board — changes persist locally for this demo.
+            Manage roles in a polished table or drag cards on the Kanban board.
+            {useApi
+              ? ' Changes sync to the API (MongoDB).'
+              : ' Offline: changes stay in this browser (localStorage).'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -120,19 +131,32 @@ export function Applications() {
             type="button"
             variant="secondary"
             size="sm"
+            disabled={resetting}
             className="gap-1.5"
-            onClick={() => {
+            onClick={async () => {
               if (
                 !window.confirm(
-                  'Reset all data to the built-in sample applications?',
+                  useApi
+                    ? 'Replace all applications on the server with the default demo list?'
+                    : 'Reset all data to the built-in sample applications?',
                 )
               )
                 return
-              resetToDemo()
+              setResetting(true)
+              try {
+                await resetToDemo()
+              } catch (e) {
+                console.error(e)
+                window.alert(
+                  'Reset failed. For hosted APIs, set ENABLE_PUBLIC_SEED=true on the server or run npm run seed.',
+                )
+              } finally {
+                setResetting(false)
+              }
             }}
           >
             <RotateCcw className="size-3.5" aria-hidden />
-            Reset demo
+            {resetting ? 'Resetting…' : 'Reset demo'}
           </Button>
         </div>
       </div>
@@ -201,13 +225,19 @@ export function Applications() {
                               size="icon"
                               className="size-9 text-zinc-500 hover:text-red-600"
                               aria-label={`Delete ${app.company}`}
-                              onClick={() => {
+                              onClick={async () => {
                                 if (
-                                  window.confirm(
+                                  !window.confirm(
                                     `Remove application at ${app.company}?`,
                                   )
                                 )
-                                  deleteApplication(app.id)
+                                  return
+                                try {
+                                  await deleteApplication(app.id)
+                                } catch (e) {
+                                  console.error(e)
+                                  window.alert('Could not delete. Check the API.')
+                                }
                               }}
                             >
                               <Trash2 className="size-4" />

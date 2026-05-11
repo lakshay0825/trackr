@@ -137,7 +137,12 @@ export function KanbanBoard({ applications, onStatusChange, onEdit }) {
     if (!nextStatus) return
     const current = applications.find((a) => a.id === active.id)
     if (current && current.status !== nextStatus) {
-      onStatusChange(active.id, nextStatus)
+      void Promise.resolve(onStatusChange(active.id, nextStatus)).catch(
+        (err) => {
+          console.error(err)
+          window.alert('Could not update status. Check the API connection.')
+        },
+      )
     }
   }
 
