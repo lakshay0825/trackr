@@ -90,7 +90,7 @@ export function Applications() {
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-600">
             Manage roles in a polished table or drag cards on the Kanban board.
             {useApi
-              ? ' Changes sync to the API (MongoDB).'
+              ? ' Changes sync to the API (PostgreSQL).'
               : ' Offline: changes stay in this browser (localStorage).'}
           </p>
         </div>

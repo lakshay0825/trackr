@@ -1,6 +1,6 @@
 # Trackr — Job Application Manager
 
-Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + **MongoDB Atlas**, **REST API**, and deploy recipes for **Vercel** (frontend) + **Render** (API).  
+Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + **PostgreSQL**, **REST API**, and deploy recipes for **Vercel** (frontend) + **Render** (API).  
 **No login** — suitable for a public demo; add JWT in a later phase for real multi-tenant use.
 
 ## Architecture
@@ -8,8 +8,8 @@ Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + 
 | Layer | Tech |
 |--------|------|
 | UI | React 19, Vite 8, Tailwind v4, shadcn-style components, @dnd-kit, Recharts |
-| API | Express.js, Mongoose, CORS |
-| Data | MongoDB Atlas (or local `mongodb://`) |
+| API | Express.js, `pg` (node-postgres), CORS |
+| Data | PostgreSQL — managed (**Neon**, **Supabase**, **Railway**, Render Postgres, etc.) or local Docker |
 
 ### REST API (`/api/applications`)
 
@@ -17,16 +17,18 @@ Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + 
 |--------|------|-------------|
 | `GET` | `/api/applications` | List all (newest `dateApplied` first) |
 | `POST` | `/api/applications` | Create (`company`, `role`, `status`, `dateApplied`, `notes`) |
-| `PATCH` | `/api/applications/:id` | Partial update (e.g. `{ "status": "Interview" }`) |
+| `PATCH` | `/api/applications/:id` | Partial update (e.g. `{ "status": "Interview" }`) — `:id` is a **UUID** |
 | `DELETE` | `/api/applications/:id` | Remove one row |
 | `POST` | `/api/applications/seed-defaults` | Replace DB with canonical demo set (see below) |
 
 `GET /health` — liveness check for Render.
 
+On startup the API runs **`CREATE TABLE IF NOT EXISTS applications (...)`** (see [`server/src/db/pool.js`](server/src/db/pool.js)).
+
 ## Prerequisites
 
 - **Node.js 20+**
-- **MongoDB Atlas** cluster (free tier is fine) and a connection string
+- **PostgreSQL 13+** (for `gen_random_uuid()` in the schema; Neon/Supabase are fine)
 
 ## Local development
 
@@ -45,11 +47,11 @@ cp server/.env.example server/.env
 
 Edit `server/.env`:
 
-- `MONGODB_URI` — Atlas connection string (include database name if you like, e.g. `.../trackr`)
-- `CLIENT_ORIGIN` — `http://localhost:5173` for local Vite
-- `ENABLE_PUBLIC_SEED` — optional; `true` if you want **Reset demo** to call the API in production (see deployment)
+- **`DATABASE_URL`** — Postgres URL (often includes `?sslmode=require` for cloud hosts)
+- **`CLIENT_ORIGIN`** — `http://localhost:5173` for local Vite
+- **`ENABLE_PUBLIC_SEED`** — optional; `true` if you want **Reset demo** to call the API in production (see deployment)
 
-### 3. Seed MongoDB
+### 3. Seed PostgreSQL
 
 ```bash
 npm run seed
@@ -82,12 +84,15 @@ Static output: `dist/`. For Vercel, set **`VITE_API_URL`** to your public API or
 
 ## Deployment
 
-### MongoDB Atlas
+### PostgreSQL (managed)
 
-1. Create a project and M0 cluster.  
-2. Database Access → user + password.  
-3. Network Access → allow `0.0.0.0/0` for a public API (tighten later) or Render’s outbound IPs if you use IP allowlisting.  
-4. Copy **connection string** into `MONGODB_URI` (Render + local `server/.env`).
+Good fits for portfolios:
+
+1. **[Neon](https://neon.tech)** — serverless Postgres, copy **`DATABASE_URL`**.  
+2. **[Supabase](https://supabase.com)** — project settings → database URI.  
+3. **[Railway](https://railway.app)** / **Render Postgres** — attach a DB service and copy the internal/external URL.
+
+Use SSL (`sslmode=require` in the URL) when the provider expects it.
 
 ### API on Render
 
@@ -96,10 +101,10 @@ Static output: `dist/`. For Vercel, set **`VITE_API_URL`** to your public API or
 3. **Build command:** `npm install`  
 4. **Start command:** `npm start`  
 5. **Environment:**  
-   - `MONGODB_URI`  
-   - `CLIENT_ORIGIN` — your Vercel app URL(s), comma-separated if needed, e.g. `https://trackr.vercel.app`  
-   - Optional: `ENABLE_PUBLIC_SEED=true` so **Reset demo** in the UI can call `POST /api/applications/seed-defaults` (otherwise that route returns **403** in production).  
-6. After first deploy, run **`npm run seed`** locally pointed at the same Atlas URI **or** trigger seed from a trusted environment — or enable `ENABLE_PUBLIC_SEED` once, reset from the app, then turn it off.
+   - **`DATABASE_URL`**  
+   - **`CLIENT_ORIGIN`** — your Vercel app URL(s), comma-separated if needed, e.g. `https://trackr.vercel.app`  
+   - Optional: **`ENABLE_PUBLIC_SEED=true`** so **Reset demo** in the UI can call `POST /api/applications/seed-defaults` (otherwise that route returns **403** in production).  
+6. After first deploy, run **`npm run seed`** locally against the same **`DATABASE_URL`** **or** use **`ENABLE_PUBLIC_SEED`** briefly from the UI, then turn it off.
 
 ### Frontend on Vercel
 
@@ -110,17 +115,17 @@ Static output: `dist/`. For Vercel, set **`VITE_API_URL`** to your public API or
 
 ### Does this stack make sense?
 
-Yes. **Vercel** is ideal for the static/Vite app; **Render** (or Railway/Fly.io) fits a small **Express** process and persistent env secrets; **Atlas** is the standard managed **MongoDB** tier for hobby/portfolio projects. Same pattern scales to JWT + user-scoped collections later.
+Yes. **Vercel** + **Render** + **managed Postgres** (Neon/Supabase) is a very common portfolio split: static SPA, small Node API, relational DB with SQL and predictable deployments.
 
 ## Demo behavior
 
-- **API available:** list/create/update/delete go to MongoDB; Kanban drag issues `PATCH` with `{ status }`.  
+- **API available:** list/create/update/delete go to **PostgreSQL**; records use **UUID** primary keys; Kanban drag sends `PATCH` with `{ status }`.  
 - **Reset demo:** re-seeds from `demoSeed.js` when the seed endpoint is allowed, else falls back to bundled offline data.  
 - **API unavailable:** offline mode + `localStorage` for that browser session.
 
 ## Resume line
 
-Built a full-stack internship/job tracker with **React**, **Node.js**, **Express**, **MongoDB Atlas**, and a **REST** API (CRUD + dashboard analytics), deployed as a **static frontend** and **hosted API** with a public portfolio demo.
+Built a full-stack internship/job tracker with **React**, **Node.js**, **Express**, **PostgreSQL**, and a **REST** API (CRUD + dashboard analytics), deployed as a **static frontend** and **hosted API** with a public portfolio demo.
 
 ## License
 

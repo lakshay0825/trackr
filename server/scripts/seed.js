@@ -1,34 +1,51 @@
 import 'dotenv/config'
-import mongoose from 'mongoose'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { createDemoApplicationDocs } from '../../src/demoSeed.js'
-import { ApplicationModel } from '../src/models/Application.js'
+import { ensureSchema, getPool } from '../src/db/pool.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 async function seed() {
-  const uri = process.env.MONGODB_URI
-  if (!uri) {
+  const url = process.env.DATABASE_URL
+  if (!url) {
     console.error(
-      `No MONGODB_URI. Create ${path.join(__dirname, '..', '.env')} from .env.example`,
+      `No DATABASE_URL. Create ${path.join(__dirname, '..', '.env')} from .env.example`,
     )
     process.exit(1)
   }
 
-  await mongoose.connect(uri)
+  const pool = getPool()
+  await ensureSchema(pool)
 
-  const rows = createDemoApplicationDocs().map((r) => ({
-    ...r,
-    dateApplied: new Date(r.dateApplied),
-    createdAt: new Date(r.createdAt),
-  }))
-
-  await ApplicationModel.deleteMany({})
-  const inserted = await ApplicationModel.insertMany(rows)
-
-  console.log(`Seeded ${inserted.length} applications`)
-  await mongoose.disconnect()
+  const docs = createDemoApplicationDocs()
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('DELETE FROM applications')
+    for (const r of docs) {
+      await client.query(
+        `INSERT INTO applications (company, role, status, date_applied, notes, created_at)
+         VALUES ($1, $2, $3, $4::date, $5, $6::date)`,
+        [
+          r.company,
+          r.role,
+          r.status,
+          r.dateApplied,
+          String(r.notes ?? ''),
+          r.createdAt,
+        ],
+      )
+    }
+    await client.query('COMMIT')
+    console.log(`Seeded ${docs.length} applications`)
+  } catch (e) {
+    await client.query('ROLLBACK')
+    throw e
+  } finally {
+    client.release()
+    await pool.end()
+  }
 }
 
 seed().catch((err) => {

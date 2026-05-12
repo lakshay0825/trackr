@@ -1,33 +1,44 @@
-import mongoose from 'mongoose'
 import { Router } from 'express'
-import { ApplicationModel } from '../models/Application.js'
+import { getPool } from '../db/pool.js'
 
 const router = Router()
 
 const STATUSES = ['Applied', 'Interview', 'Offer', 'Rejected']
 
-function isoDay(d) {
-  const x = d instanceof Date ? d : new Date(d)
-  if (Number.isNaN(x.getTime())) return new Date().toISOString().slice(0, 10)
-  return x.toISOString().slice(0, 10)
+function isUuid(id) {
+  return /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(
+    String(id),
+  )
 }
 
-function toClient(doc) {
+function isoDay(value) {
+  if (value == null) return new Date().toISOString().slice(0, 10)
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10)
+  return d.toISOString().slice(0, 10)
+}
+
+function toClient(row) {
   return {
-    id: doc._id.toString(),
-    company: doc.company,
-    role: doc.role,
-    status: doc.status,
-    dateApplied: isoDay(doc.dateApplied),
-    notes: doc.notes ?? '',
-    createdAt: isoDay(doc.createdAt),
+    id: row.id,
+    company: row.company,
+    role: row.role,
+    status: row.status,
+    dateApplied: isoDay(row.date_applied),
+    notes: row.notes ?? '',
+    createdAt: isoDay(row.created_at),
   }
 }
 
 router.get('/', async (_req, res) => {
   try {
-    const docs = await ApplicationModel.find().sort({ dateApplied: -1 }).lean()
-    res.json(docs.map((d) => toClient(d)))
+    const pool = getPool()
+    const { rows } = await pool.query(
+      `SELECT id, company, role, status, date_applied, notes, created_at
+       FROM applications
+       ORDER BY date_applied DESC`,
+    )
+    res.json(rows.map(toClient))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to list applications' })
@@ -47,22 +58,28 @@ router.post('/', async (req, res) => {
     if (Number.isNaN(da.getTime())) {
       return res.status(400).json({ error: 'invalid dateApplied' })
     }
-    const doc = await ApplicationModel.create({
-      company: String(company).trim(),
-      role: String(role).trim(),
-      status,
-      dateApplied: da,
-      notes: String(notes ?? '').trim(),
-      createdAt: new Date(),
-    })
-    res.status(201).json(toClient(doc))
+    const ca = new Date()
+    const pool = getPool()
+    const { rows } = await pool.query(
+      `INSERT INTO applications (company, role, status, date_applied, notes, created_at)
+       VALUES ($1, $2, $3, $4::date, $5, $6::date)
+       RETURNING id, company, role, status, date_applied, notes, created_at`,
+      [
+        String(company).trim(),
+        String(role).trim(),
+        status,
+        isoDay(da),
+        String(notes ?? '').trim(),
+        isoDay(ca),
+      ],
+    )
+    res.status(201).json(toClient(rows[0]))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to create application' })
   }
 })
 
-/** Must be registered before `/:id` routes. */
 router.post('/seed-defaults', async (_req, res) => {
   const allow =
     process.env.ENABLE_PUBLIC_SEED === 'true' ||
@@ -74,19 +91,40 @@ router.post('/seed-defaults', async (_req, res) => {
     const { createDemoApplicationDocs } = await import(
       '../../../src/demoSeed.js'
     )
-    const rows = createDemoApplicationDocs().map((r) => ({
-      ...r,
-      dateApplied: new Date(r.dateApplied),
-      createdAt: new Date(r.createdAt),
-    }))
-    await ApplicationModel.deleteMany({})
-    const inserted = await ApplicationModel.insertMany(rows)
-    const docs = await ApplicationModel.find({
-      _id: { $in: inserted.map((d) => d._id) },
-    })
-      .sort({ dateApplied: -1 })
-      .lean()
-    res.json(docs.map((d) => toClient(d)))
+    const docs = createDemoApplicationDocs()
+    const pool = getPool()
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('DELETE FROM applications')
+      for (const r of docs) {
+        await client.query(
+          `INSERT INTO applications (company, role, status, date_applied, notes, created_at)
+           VALUES ($1, $2, $3, $4::date, $5, $6::date)`,
+          [
+            r.company,
+            r.role,
+            r.status,
+            r.dateApplied,
+            String(r.notes ?? ''),
+            r.createdAt,
+          ],
+        )
+      }
+      await client.query('COMMIT')
+    } catch (e) {
+      await client.query('ROLLBACK')
+      throw e
+    } finally {
+      client.release()
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, company, role, status, date_applied, notes, created_at
+       FROM applications
+       ORDER BY date_applied DESC`,
+    )
+    res.json(rows.map(toClient))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to seed defaults' })
@@ -96,35 +134,56 @@ router.post('/seed-defaults', async (_req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isUuid(id)) {
       return res.status(400).json({ error: 'invalid id' })
     }
     const body = req.body ?? {}
-    const update = {}
-    if (body.company !== undefined) update.company = String(body.company).trim()
-    if (body.role !== undefined) update.role = String(body.role).trim()
+    const sets = []
+    const vals = []
+    let i = 1
+
+    if (body.company !== undefined) {
+      sets.push(`company = $${i++}`)
+      vals.push(String(body.company).trim())
+    }
+    if (body.role !== undefined) {
+      sets.push(`role = $${i++}`)
+      vals.push(String(body.role).trim())
+    }
     if (body.status !== undefined) {
       if (!STATUSES.includes(body.status)) {
         return res.status(400).json({ error: 'invalid status' })
       }
-      update.status = body.status
+      sets.push(`status = $${i++}`)
+      vals.push(body.status)
     }
     if (body.dateApplied !== undefined) {
       const da = new Date(body.dateApplied)
       if (Number.isNaN(da.getTime())) {
         return res.status(400).json({ error: 'invalid dateApplied' })
       }
-      update.dateApplied = da
+      sets.push(`date_applied = $${i++}::date`)
+      vals.push(isoDay(da))
     }
-    if (body.notes !== undefined) update.notes = String(body.notes).trim()
+    if (body.notes !== undefined) {
+      sets.push(`notes = $${i++}`)
+      vals.push(String(body.notes).trim())
+    }
 
-    const doc = await ApplicationModel.findByIdAndUpdate(
-      id,
-      { $set: update },
-      { new: true, runValidators: true },
-    ).lean()
-    if (!doc) return res.status(404).json({ error: 'not found' })
-    res.json(toClient(doc))
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'no fields to update' })
+    }
+
+    vals.push(id)
+    const pool = getPool()
+    const { rows } = await pool.query(
+      `UPDATE applications SET ${sets.join(', ')}
+       WHERE id = $${i}::uuid
+       RETURNING id, company, role, status, date_applied, notes, created_at`,
+      vals,
+    )
+    if (!rows.length) return res.status(404).json({ error: 'not found' })
+    res.json(toClient(rows[0]))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to update application' })
@@ -134,11 +193,15 @@ router.patch('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isUuid(id)) {
       return res.status(400).json({ error: 'invalid id' })
     }
-    const result = await ApplicationModel.findByIdAndDelete(id)
-    if (!result) return res.status(404).json({ error: 'not found' })
+    const pool = getPool()
+    const { rowCount } = await pool.query(
+      `DELETE FROM applications WHERE id = $1::uuid`,
+      [id],
+    )
+    if (!rowCount) return res.status(404).json({ error: 'not found' })
     res.status(204).send()
   } catch (err) {
     console.error(err)

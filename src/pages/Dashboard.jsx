@@ -141,7 +141,7 @@ export function Dashboard() {
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-600">
           Pipeline health at a glance.
           {useApi
-            ? ' Data is loaded from the REST API (MongoDB).'
+            ? ' Data is loaded from the REST API (PostgreSQL).'
             : ' Offline demo: data stays in this browser (localStorage).'}
         </p>
       </div>
