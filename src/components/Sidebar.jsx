@@ -1,5 +1,7 @@
-import { Briefcase, LayoutDashboard, Menu, X } from 'lucide-react'
+import { Briefcase, LayoutDashboard, LogOut, Menu, X } from 'lucide-react'
 import { useState } from 'react'
+import { useAuth } from '../context/useAuth'
+import { Button } from './ui/button'
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -8,6 +10,7 @@ const NAV = [
 
 export function Sidebar({ active, onNavigate }) {
   const [open, setOpen] = useState(false)
+  const { authEnabled, user, logout } = useAuth()
 
   const link = (item) => {
     const Icon = item.icon
@@ -82,9 +85,25 @@ export function Sidebar({ active, onNavigate }) {
           <nav className="flex flex-col gap-1 pt-2 lg:pt-0" aria-label="Main">
             {NAV.map(link)}
           </nav>
-          <p className="mt-auto hidden px-2 pt-6 text-xs leading-relaxed text-zinc-400 lg:block">
-            Portfolio demo — data stays in your browser (localStorage).
-          </p>
+          {authEnabled && user ? (
+            <div className="mt-auto hidden space-y-2 px-2 pt-6 lg:block">
+              <p className="truncate text-xs text-zinc-500">{user.email}</p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full"
+                onClick={logout}
+              >
+                <LogOut className="size-3.5" aria-hidden />
+                Sign out
+              </Button>
+            </div>
+          ) : (
+            <p className="mt-auto hidden px-2 pt-6 text-xs leading-relaxed text-zinc-400 lg:block">
+              Portfolio demo — syncs to PostgreSQL when the API is running.
+            </p>
+          )}
         </div>
       </aside>
     </>

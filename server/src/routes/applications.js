@@ -1,7 +1,18 @@
 import { Router } from 'express'
 import { getPool } from '../db/pool.js'
+import { isAuthEnabled, requireAuth } from '../middleware/auth.js'
 
 const router = Router()
+
+router.use(requireAuth)
+
+function userFilter(req, paramIndex = 1) {
+  if (!isAuthEnabled() || !req.user?.id) return { sql: '', params: [] }
+  return {
+    sql: ` AND user_id = $${paramIndex}::uuid`,
+    params: [req.user.id],
+  }
+}
 
 const STATUSES = ['Applied', 'Interview', 'Offer', 'Rejected']
 
@@ -30,13 +41,16 @@ function toClient(row) {
   }
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
     const pool = getPool()
+    const filter = userFilter(req)
     const { rows } = await pool.query(
       `SELECT id, company, role, status, date_applied, notes, created_at
        FROM applications
+       WHERE 1=1${filter.sql}
        ORDER BY date_applied DESC`,
+      filter.params,
     )
     res.json(rows.map(toClient))
   } catch (err) {
@@ -60,9 +74,10 @@ router.post('/', async (req, res) => {
     }
     const ca = new Date()
     const pool = getPool()
+    const userId = isAuthEnabled() ? req.user?.id : null
     const { rows } = await pool.query(
-      `INSERT INTO applications (company, role, status, date_applied, notes, created_at)
-       VALUES ($1, $2, $3, $4::date, $5, $6::date)
+      `INSERT INTO applications (company, role, status, date_applied, notes, created_at, user_id)
+       VALUES ($1, $2, $3, $4::date, $5, $6::date, $7::uuid)
        RETURNING id, company, role, status, date_applied, notes, created_at`,
       [
         String(company).trim(),
@@ -71,6 +86,7 @@ router.post('/', async (req, res) => {
         isoDay(da),
         String(notes ?? '').trim(),
         isoDay(ca),
+        userId,
       ],
     )
     res.status(201).json(toClient(rows[0]))
@@ -80,7 +96,7 @@ router.post('/', async (req, res) => {
   }
 })
 
-router.post('/seed-defaults', async (_req, res) => {
+router.post('/seed-defaults', async (req, res) => {
   const allow =
     process.env.ENABLE_PUBLIC_SEED === 'true' ||
     process.env.NODE_ENV !== 'production'
@@ -93,14 +109,21 @@ router.post('/seed-defaults', async (_req, res) => {
     )
     const docs = createDemoApplicationDocs()
     const pool = getPool()
+    const userId = isAuthEnabled() ? req.user?.id : null
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
-      await client.query('DELETE FROM applications')
+      if (userId) {
+        await client.query(`DELETE FROM applications WHERE user_id = $1::uuid`, [
+          userId,
+        ])
+      } else {
+        await client.query('DELETE FROM applications')
+      }
       for (const r of docs) {
         await client.query(
-          `INSERT INTO applications (company, role, status, date_applied, notes, created_at)
-           VALUES ($1, $2, $3, $4::date, $5, $6::date)`,
+          `INSERT INTO applications (company, role, status, date_applied, notes, created_at, user_id)
+           VALUES ($1, $2, $3, $4::date, $5, $6::date, $7::uuid)`,
           [
             r.company,
             r.role,
@@ -108,6 +131,7 @@ router.post('/seed-defaults', async (_req, res) => {
             r.dateApplied,
             String(r.notes ?? ''),
             r.createdAt,
+            userId,
           ],
         )
       }
@@ -119,10 +143,13 @@ router.post('/seed-defaults', async (_req, res) => {
       client.release()
     }
 
+    const filter = userFilter(req)
     const { rows } = await pool.query(
       `SELECT id, company, role, status, date_applied, notes, created_at
        FROM applications
+       WHERE 1=1${filter.sql}
        ORDER BY date_applied DESC`,
+      filter.params,
     )
     res.json(rows.map(toClient))
   } catch (err) {
@@ -175,12 +202,14 @@ router.patch('/:id', async (req, res) => {
     }
 
     vals.push(id)
+    const idParam = i
+    const filter = userFilter(req, idParam + 1)
     const pool = getPool()
     const { rows } = await pool.query(
       `UPDATE applications SET ${sets.join(', ')}
-       WHERE id = $${i}::uuid
+       WHERE id = $${idParam}::uuid${filter.sql}
        RETURNING id, company, role, status, date_applied, notes, created_at`,
-      vals,
+      [...vals, ...filter.params],
     )
     if (!rows.length) return res.status(404).json({ error: 'not found' })
     res.json(toClient(rows[0]))
@@ -196,10 +225,11 @@ router.delete('/:id', async (req, res) => {
     if (!isUuid(id)) {
       return res.status(400).json({ error: 'invalid id' })
     }
+    const filter = userFilter(req, 2)
     const pool = getPool()
     const { rowCount } = await pool.query(
-      `DELETE FROM applications WHERE id = $1::uuid`,
-      [id],
+      `DELETE FROM applications WHERE id = $1::uuid${filter.sql}`,
+      [id, ...filter.params],
     )
     if (!rowCount) return res.status(404).json({ error: 'not found' })
     res.status(204).send()

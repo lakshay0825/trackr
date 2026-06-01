@@ -2,6 +2,8 @@ import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
 import { applicationsRouter } from './routes/applications.js'
+import { authRouter } from './routes/auth.js'
+import { isAuthEnabled } from './middleware/auth.js'
 import { ensureSchema, getPool } from './db/pool.js'
 
 const PORT = Number(process.env.PORT) || 4000
@@ -24,6 +26,7 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'trackr-api' })
 })
 
+app.use('/api/auth', authRouter)
 app.use('/api/applications', applicationsRouter)
 
 async function main() {
@@ -44,6 +47,11 @@ async function main() {
   app.listen(PORT, () => {
     console.log(`API http://localhost:${PORT}`)
     console.log('REST: GET/POST/PATCH/DELETE /api/applications …')
+    if (isAuthEnabled()) {
+      console.log('Auth: JWT enabled — POST /api/auth/register, /api/auth/login')
+    } else {
+      console.log('Auth: open API (set JWT_SECRET to require login)')
+    }
   })
 }
 

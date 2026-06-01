@@ -1,14 +1,14 @@
 # Trackr — Job Application Manager
 
-Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + **PostgreSQL**, **REST API**, and deploy recipes for **Vercel** (frontend) + **Render** (API).  
-**No login** — suitable for a public demo; add JWT in a later phase for real multi-tenant use.
+Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + **PostgreSQL**, **REST API**, **JWT auth** (optional), **GitHub Actions CI**, and deploy recipes for **Vercel** (frontend) + **Render** (API).
 
 ## Architecture
 
 | Layer | Tech |
 |--------|------|
 | UI | React 19, Vite 8, Tailwind v4, shadcn-style components, @dnd-kit, Recharts |
-| API | Express.js, `pg` (node-postgres), CORS |
+| API | Express.js, `pg` (node-postgres), CORS, JWT (`jsonwebtoken`) + bcrypt |
+| CI | GitHub Actions — lint + frontend build + API syntax check on push/PR |
 | Data | PostgreSQL — managed (**Neon**, **Supabase**, **Railway**, Render Postgres, etc.) or local Docker |
 
 ### REST API (`/api/applications`)
@@ -20,8 +20,13 @@ Portfolio-style **full-stack** demo: **React (Vite)** + **Node.js (Express)** + 
 | `PATCH` | `/api/applications/:id` | Partial update (e.g. `{ "status": "Interview" }`) — `:id` is a **UUID** |
 | `DELETE` | `/api/applications/:id` | Remove one row |
 | `POST` | `/api/applications/seed-defaults` | Replace DB with canonical demo set (see below) |
+| `POST` | `/api/auth/register` | Create account (when `JWT_SECRET` is set) |
+| `POST` | `/api/auth/login` | Issue JWT |
+| `GET` | `/api/auth/me` | Auth status / current user from `Authorization: Bearer …` |
 
 `GET /health` — liveness check for Render.
+
+When **`JWT_SECRET`** is set on the API, all `/api/applications` routes require a valid Bearer token; each user only sees their own rows (`user_id` on `applications`). Without `JWT_SECRET`, the API stays open (local demo / legacy behavior).
 
 On startup the API runs **`CREATE TABLE IF NOT EXISTS applications (...)`** (see [`server/src/db/pool.js`](server/src/db/pool.js)).
 
@@ -50,6 +55,8 @@ Edit `server/.env`:
 - **`DATABASE_URL`** — Postgres URL (often includes `?sslmode=require` for cloud hosts)
 - **`CLIENT_ORIGIN`** — `http://localhost:5173` for local Vite
 - **`ENABLE_PUBLIC_SEED`** — optional; `true` if you want **Reset demo** to call the API in production (see deployment)
+- **`JWT_SECRET`** — optional; set to enable register/login and per-user data
+- **`JWT_EXPIRES_IN`** — optional; default `7d`
 
 ### 3. Seed PostgreSQL
 
@@ -104,7 +111,17 @@ Use SSL (`sslmode=require` in the URL) when the provider expects it.
    - **`DATABASE_URL`**  
    - **`CLIENT_ORIGIN`** — your Vercel app URL(s), comma-separated if needed, e.g. `https://trackr.vercel.app`  
    - Optional: **`ENABLE_PUBLIC_SEED=true`** so **Reset demo** in the UI can call `POST /api/applications/seed-defaults` (otherwise that route returns **403** in production).  
-6. After first deploy, run **`npm run seed`** locally against the same **`DATABASE_URL`** **or** use **`ENABLE_PUBLIC_SEED`** briefly from the UI, then turn it off.
+   - **`JWT_SECRET`** — long random string so the live app uses sign-in (recommended for portfolio “real app” story).  
+6. After first deploy, run **`npm run seed`** locally against the same **`DATABASE_URL`** **or** use **`ENABLE_PUBLIC_SEED`** briefly from the UI, then turn it off. With JWT enabled, register in the UI instead of relying on a global seed.
+
+### CI (GitHub Actions)
+
+On push/PR to `main` (or `master`), [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs:
+
+- **Frontend:** `npm ci` → `npm run lint` → `npm run build`
+- **API:** `npm ci` in `server/` → `node --check` on entry routes
+
+Add a **CI passing** badge to your README or portfolio once the repo is on GitHub.
 
 ### Frontend on Vercel
 
@@ -125,7 +142,7 @@ Yes. **Vercel** + **Render** + **managed Postgres** (Neon/Supabase) is a very co
 
 ## Resume line
 
-Built a full-stack internship/job tracker with **React**, **Node.js**, **Express**, **PostgreSQL**, and a **REST** API (CRUD + dashboard analytics), deployed as a **static frontend** and **hosted API** with a public portfolio demo.
+Built a full-stack internship/job tracker with **React**, **Node.js**, **Express**, **PostgreSQL**, **JWT auth**, and a **REST** API (CRUD + dashboard analytics), with **GitHub Actions CI** and deployment as a **static frontend** plus **hosted API**.
 
 ## License
 

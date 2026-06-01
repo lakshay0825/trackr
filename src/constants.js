@@ -38,6 +38,7 @@ export const STATUS_STYLES = {
 }
 
 export const STORAGE_KEY = 'trackr-demo-applications'
+export const AUTH_TOKEN_KEY = 'trackr-auth-token'
 
 /** Maps pipeline status → shadcn-style Badge variant */
 export const STATUS_BADGE_VARIANT = {
